@@ -590,6 +590,9 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool nochange, 
   int left_curline_col = 0;
   int right_curline_col = 0;
 
+  VirtText virt_inline = KV_INITIAL_VALUE;
+  size_t virt_inline_i = 0;
+
   // draw_state: items that are drawn in sequence:
 #define WL_START        0               // nothing done yet
 #define WL_CMDLINE      (WL_START + 1)    // cmdline window column
@@ -1384,7 +1387,8 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool nochange, 
       n_extra = 0;
     }
 
-    if (draw_state == WL_LINE && (area_highlighting || has_spell)) {
+    int extmark_attr = 0;
+    if (draw_state == WL_LINE && (area_highlighting || has_spell || extra_check)) {
       // handle Visual or match highlighting in this line
       if (vcol == fromcol
           || (vcol + 1 == fromcol && n_extra == 0
@@ -1436,6 +1440,44 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool nochange, 
             ? hl_combine_attr(hl_combine_attr(cul_attr, line_attr),
                               hl_get_underline())
             : hl_combine_attr(line_attr, cul_attr);
+        }
+      }
+
+      if (has_decor && v >= 0) {
+        bool selected = (area_active || (area_highlighting && noinvcur
+                                         && (colnr_T)vcol == wp->w_virtcol));
+        extmark_attr = decor_redraw_col(wp->w_buffer, (colnr_T)v, off,
+                                            selected, &decor_state);
+
+        // we could already be inside an existing virt_line with multiple chunks
+        if (!(virt_inline_i < kv_size(virt_inline))) {
+          DecorState *state = &decor_state;
+          for (size_t i = 0; i < kv_size(state->active); i++) {
+            DecorRange *item = &kv_A(state->active, i);
+            if (!(item->start_row == state->row
+                  && kv_size(item->decor.virt_text)
+                  && item->decor.virt_text_pos == kVTInline)) {
+              continue;
+            }
+            if (item->win_col >= -1 && item->start_col <= v) {
+              virt_inline = item->decor.virt_text;
+              virt_inline_i = 0;
+              item->win_col = -2;
+              break;
+            }
+          }
+        }
+
+        if (n_extra <= 0 && virt_inline_i < kv_size(virt_inline)) {
+          VirtTextChunk vtc = kv_A(virt_inline, virt_inline_i);
+          p_extra = (char_u *)vtc.text;
+          n_extra = (int)STRLEN(p_extra);
+          c_extra = NUL;
+          c_final = NUL;
+          extra_attr = vtc.hl_id ? syn_id2attr(vtc.hl_id) : 0;
+          n_attr = n_extra;
+          extmark_attr = 0;
+          virt_inline_i++;
         }
       }
 
@@ -1702,10 +1744,6 @@ int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool nochange, 
         }
 
         if (has_decor && v > 0) {
-          bool selected = (area_active || (area_highlighting && noinvcur
-                                           && (colnr_T)vcol == wp->w_virtcol));
-          int extmark_attr = decor_redraw_col(wp->w_buffer, (colnr_T)v - 1, off,
-                                              selected, &decor_state);
           if (extmark_attr != 0) {
             if (!attr_pri) {
               char_attr = hl_combine_attr(char_attr, extmark_attr);
