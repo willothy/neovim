@@ -4,14 +4,52 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
+#include "nvim/api/private/converter.h"
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
 #include "nvim/api/tabpage.h"
 #include "nvim/api/vim.h"
 #include "nvim/buffer_defs.h"
+#include "nvim/eval/typval.h"
+#include "nvim/eval/typval_defs.h"
+#include "nvim/eval/typval_encode.h"
+#include "nvim/eval/window.h"
 #include "nvim/globals.h"
 #include "nvim/memory.h"
 #include "nvim/window.h"
+
+/// Returns the layout of a tabpage as a tree-like nested list
+///
+/// @param tabpage Tabpage handle, or 0 for the current tabpage
+/// @param[out] err Error details, if any.
+/// @return Tree of windows and frames in `tabpage`, or an empty array if the tab is invalid
+Array nvim_tabpage_get_layout(Tabpage tabpage, Error *err)
+  FUNC_API_SINCE(10)
+{
+  tabpage_T *tab;
+  if (tabpage == 0) {
+    tab = curtab;
+  } else {
+    tab = find_tab_by_handle(tabpage, err);
+  }
+
+  if (!tab) {
+    return (Array)ARRAY_DICT_INIT;
+  }
+
+  list_T *fr_list = tv_list_alloc(2);
+
+  get_framelayout(tab->tp_topframe, fr_list, true);
+
+  typval_T list_tv = {
+    .vval.v_list = fr_list,
+    .v_type = VAR_LIST,
+  };
+
+  Array rv = vim_to_object(&list_tv).data.array;
+  tv_clear(&list_tv);
+  return rv;
+}
 
 /// Gets the windows in a tabpage
 ///

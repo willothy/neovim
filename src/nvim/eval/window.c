@@ -212,7 +212,7 @@ win_T *find_tabwin(typval_T *wvp, typval_T *tvp)
 }
 
 /// Get the layout of the given tab page for winlayout().
-static void get_framelayout(const frame_T *fr, list_T *l, bool outer)
+void get_framelayout(const frame_T *fr, list_T *l, bool outer)
 {
   if (fr == NULL) {
     return;
@@ -298,8 +298,7 @@ static int get_winnr(tabpage_T *tp, typval_T *argvar)
     return 0;
   }
 
-  for (win_T *wp = (tp == curtab) ? firstwin : tp->tp_firstwin;
-       wp != twin; wp = wp->w_next) {
+  for (win_T *wp = (tp == curtab) ? firstwin : tp->tp_firstwin; wp != twin; wp = wp->w_next) {
     if (wp == NULL) {
       // didn't find it in this tabpage
       nr = 0;
@@ -332,8 +331,7 @@ static dict_T *get_win_info(win_T *wp, int16_t tpnr, int16_t winnr)
   tv_dict_add_nr(dict, S_LEN("textoff"), win_col_off(wp));
   tv_dict_add_nr(dict, S_LEN("terminal"), bt_terminal(wp->w_buffer));
   tv_dict_add_nr(dict, S_LEN("quickfix"), bt_quickfix(wp->w_buffer));
-  tv_dict_add_nr(dict, S_LEN("loclist"),
-                 (bt_quickfix(wp->w_buffer) && wp->w_llist_ref != NULL));
+  tv_dict_add_nr(dict, S_LEN("loclist"), (bt_quickfix(wp->w_buffer) && wp->w_llist_ref != NULL));
 
   // Add a reference to window variables
   tv_dict_add_dict(dict, S_LEN("variables"), wp->w_vars);
@@ -366,9 +364,7 @@ void f_gettabinfo(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   tabpage_T *tparg = NULL;
 
-  tv_list_alloc_ret(rettv, (argvars[0].v_type == VAR_UNKNOWN
-                            ? 1
-                            : kListLenMayKnow));
+  tv_list_alloc_ret(rettv, (argvars[0].v_type == VAR_UNKNOWN ? 1 : kListLenMayKnow));
 
   if (argvars[0].v_type != VAR_UNKNOWN) {
     // Information about one tab page
@@ -613,8 +609,8 @@ static void win_move_into_split(win_T *wp, win_T *targetwin, int size, int flags
   int dir;
   (void)winframe_remove(wp, &dir, NULL);
   win_remove(wp, NULL);
-  last_status(false);     // may need to remove last status line
-  (void)win_comp_pos();   // recompute window positions
+  last_status(false);    // may need to remove last status line
+  (void)win_comp_pos();  // recompute window positions
 
   // Split a window on the desired side and put the old window there
   (void)win_split_ins(size, flags, wp, dir);
@@ -638,8 +634,7 @@ void f_win_splitmove(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   win_T *wp = find_win_by_nr_or_id(&argvars[0]);
   win_T *targetwin = find_win_by_nr_or_id(&argvars[1]);
 
-  if (wp == NULL || targetwin == NULL || wp == targetwin
-      || !win_valid(wp) || !win_valid(targetwin)
+  if (wp == NULL || targetwin == NULL || wp == targetwin || !win_valid(wp) || !win_valid(targetwin)
       || win_valid_floating(wp) || win_valid_floating(targetwin)) {
     emsg(_(e_invalwindow));
     rettv->vval.v_number = -1;
@@ -778,11 +773,9 @@ void f_winrestcmd(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   for (int i = 0; i < 2; i++) {
     int winnr = 1;
     FOR_ALL_WINDOWS_IN_TAB(wp, curtab) {
-      snprintf(buf, sizeof(buf), "%dresize %d|", winnr,
-               wp->w_height);
+      snprintf(buf, sizeof(buf), "%dresize %d|", winnr, wp->w_height);
       ga_concat(&ga, buf);
-      snprintf(buf, sizeof(buf), "vert %dresize %d|", winnr,
-               wp->w_width);
+      snprintf(buf, sizeof(buf), "vert %dresize %d|", winnr, wp->w_width);
       ga_concat(&ga, buf);
       winnr++;
     }
