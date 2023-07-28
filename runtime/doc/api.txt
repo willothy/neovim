@@ -3178,6 +3178,17 @@ nvim_tabpage_del_var({tabpage}, {name})               *nvim_tabpage_del_var()*
       • {tabpage}  Tabpage handle, or 0 for current tabpage
       • {name}     Variable name
 
+                                                   
+nvim_tabpage_get_layout({tabpage})                 *nvim_tabpage_get_layout()*
+    Returns the layout of a tabpage as a tree-structured Dictionary.
+
+    Parameters: ~
+      • {tabpage}  Tabpage handle, or 0 for current tabpage
+
+    Return: ~
+      • Tree of windows and frames in tabpage, or nil if invalid.
+
+
 nvim_tabpage_get_number({tabpage})                 *nvim_tabpage_get_number()*
     Gets the tabpage number
 
