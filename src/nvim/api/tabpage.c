@@ -71,11 +71,17 @@ void nvim_tabpage_set_layout(Tabpage tabpage, Array layout, Error *err)
     return;
   }
 
+  RedrawingDisabled++;
+
+  FOR_ALL_WINDOWS_IN_TAB(wp, tab) {
+    if (wp != tab->tp_firstwin) {
+      win_close(wp, false, true);
+    }
+  }
+
   MAXSIZE_TEMP_ARRAY(a, 2);
   ADD(a, TABPAGE_OBJ(tabpage));
   ADD(a, ARRAY_OBJ(layout));
-
-  RedrawingDisabled++;
 
   NLUA_EXEC_STATIC("vim._set_layout(...)", a, err);
 
