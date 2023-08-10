@@ -9,6 +9,7 @@
 #include "nvim/api/private/helpers.h"
 #include "nvim/api/tabpage.h"
 #include "nvim/api/vim.h"
+#include "nvim/lua/executor.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/typval_defs.h"
@@ -49,6 +50,36 @@ Array nvim_tabpage_get_layout(Tabpage tabpage, Error *err)
   Array rv = vim_to_object(&list_tv).data.array;
   tv_clear(&list_tv);
   return rv;
+}
+
+/// Sets the layout of a tabpage according to the given structure
+///
+/// @param tabpage Tabpage handle, or 0 for the current tabpage
+/// @param layout Nested array structure representing window tree
+/// @param[out] err Error details, if any.
+void nvim_tabpage_set_layout(Tabpage tabpage, Array layout, Error *err)
+  FUNC_API_SINCE(10)
+{
+  tabpage_T *tab;
+  if (tabpage == 0) {
+    tab = curtab;
+  } else {
+    tab = find_tab_by_handle(tabpage, err);
+  }
+
+  if (!tab) {
+    return;
+  }
+
+  MAXSIZE_TEMP_ARRAY(a, 2);
+  ADD(a, TABPAGE_OBJ(tabpage));
+  ADD(a, ARRAY_OBJ(layout));
+
+  RedrawingDisabled++;
+
+  NLUA_EXEC_STATIC("vim._set_layout(...)", a, err);
+
+  RedrawingDisabled--;
 }
 
 /// Gets the windows in a tabpage
