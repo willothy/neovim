@@ -1,4 +1,5 @@
 local uv = vim.uv
+local uri_encode = vim.uri_encode
 
 --- @type (fun(modename: string): fun()|string)[]
 local loaders = package.loaders
@@ -17,7 +18,7 @@ local M = {}
 ---@class ModuleInfo
 ---@field modpath string Path of the module
 ---@field modname string Name of the module
----@field stat? uv_fs_t File stat of the module path
+---@field stat? uv.uv_fs_t File stat of the module path
 
 ---@alias LoaderStats table<string, {total:number, time:number, [string]:number?}?>
 
@@ -33,7 +34,7 @@ M.enabled = false
 ---@field _rtp_key string
 ---@field _hashes? table<string, CacheHash>
 local Loader = {
-  VERSION = 3,
+  VERSION = 4,
   ---@type table<string, table<string,ModuleInfo>>
   _indexed = {},
   ---@type table<string, string[]>
@@ -99,7 +100,7 @@ end
 ---@return string file_name
 ---@private
 function Loader.cache_file(name)
-  local ret = M.path .. '/' .. name:gsub('[/\\:]', '%%')
+  local ret = ('%s/%s'):format(M.path, uri_encode(name, 'rfc2396'))
   return ret:sub(-4) == '.lua' and (ret .. 'c') or (ret .. '.luac')
 end
 

@@ -58,7 +58,11 @@ local TYPES = { 'integer', 'number', 'string', 'table', 'list', 'boolean', 'func
 local TAGGED_TYPES = { 'TSNode', 'LanguageTree' }
 
 -- Document these as 'table'
-local ALIAS_TYPES = { 'Range', 'Range4', 'Range6', 'TSMetadata' }
+local ALIAS_TYPES = {
+  'Range', 'Range4', 'Range6', 'TSMetadata',
+  'vim.filetype.add.filetypes',
+  'vim.filetype.match.args'
+}
 
 local debug_outfile = nil --- @type string?
 local debug_output = {}
@@ -154,6 +158,8 @@ local function removeCommentFromLine(line)
   return line:sub(1, pos_comment - 1), line:sub(pos_comment)
 end
 
+--- Processes "@…" directives in a docstring line.
+---
 --- @param line string
 --- @param generics table<string,string>
 --- @return string?
@@ -206,6 +212,8 @@ local function process_magic(line, generics)
       magic = magic:gsub('^return%s+.*%((' .. type .. ')%)', 'return %1')
       magic = magic:gsub('^return%s+.*%((' .. type .. '|nil)%)', 'return %1')
     end
+    -- Remove first "#" comment char, if any. https://github.com/LuaLS/lua-language-server/wiki/Annotations#return
+    magic = magic:gsub('# ', '', 1)
     -- handle the return of vim.spell.check
     magic = magic:gsub('({.*}%[%])', '`%1`')
     magic_split = vim.split(magic, ' ', { plain = true })

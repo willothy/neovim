@@ -1,6 +1,7 @@
 local api = vim.api
 local bit = require('bit')
 local handlers = require('vim.lsp.handlers')
+local ms = require('vim.lsp.protocol').Methods
 local util = require('vim.lsp.util')
 local uv = vim.uv
 
@@ -13,11 +14,11 @@ local uv = vim.uv
 --- @field marked boolean whether this token has had extmarks applied
 ---
 --- @class STCurrentResult
---- @field version integer document version associated with this result
---- @field result_id string resultId from the server; used with delta requests
---- @field highlights STTokenRange[] cache of highlight ranges for this document version
---- @field tokens integer[] raw token array as received by the server. used for calculating delta responses
---- @field namespace_cleared boolean whether the namespace was cleared for this result yet
+--- @field version? integer document version associated with this result
+--- @field result_id? string resultId from the server; used with delta requests
+--- @field highlights? STTokenRange[] cache of highlight ranges for this document version
+--- @field tokens? integer[] raw token array as received by the server. used for calculating delta responses
+--- @field namespace_cleared? boolean whether the namespace was cleared for this result yet
 ---
 --- @class STActiveRequest
 --- @field request_id integer the LSP request ID of the most recent request sent to the server
@@ -292,7 +293,7 @@ function STHighlighter:send_request()
       local hasEditProvider = type(spec) == 'table' and spec.delta
 
       local params = { textDocument = util.make_text_document_params(self.bufnr) }
-      local method = 'textDocument/semanticTokens/full'
+      local method = ms.textDocument_semanticTokens_full
 
       if hasEditProvider and current_result.result_id then
         method = method .. '/delta'
@@ -716,8 +717,7 @@ end
 --- mark will be deleted by the semantic token engine when appropriate; for
 --- example, when the LSP sends updated tokens. This function is intended for
 --- use inside |LspTokenUpdate| callbacks.
----@param token (table) a semantic token, found as `args.data.token` in
----       |LspTokenUpdate|.
+---@param token (table) a semantic token, found as `args.data.token` in |LspTokenUpdate|.
 ---@param bufnr (integer) the buffer to highlight
 ---@param client_id (integer) The ID of the |vim.lsp.client|
 ---@param hl_group (string) Highlight group name
@@ -755,7 +755,7 @@ end
 --- the BufWinEnter event should take care of it next time it's displayed.
 ---
 ---@see https://microsoft.github.io/language-server-protocol/specifications/specification-current/#semanticTokens_refreshRequest
-handlers['workspace/semanticTokens/refresh'] = function(err, _, ctx)
+handlers[ms.workspace_semanticTokens_refresh] = function(err, _, ctx)
   if err then
     return vim.NIL
   end
