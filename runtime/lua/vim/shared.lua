@@ -979,4 +979,41 @@ do
   end
 end
 
+---@param tabpage tabpage
+---@param layout table
+function vim._set_layout(tabpage, layout)
+  local function set_layout(node)
+    local ty = node[1]
+    if ty == 'leaf' then
+      local buf = node[2]
+      if type(buf) == 'string' then
+        buf = vim.fn.bufadd(buf)
+        vim.api.nvim_buf_set_option(buf, 'buflisted', true)
+      end
+      vim.api.nvim_set_current_buf(buf)
+    else
+      local win_queue = {}
+      for i in ipairs(node[2]) do
+        if i > 1 then
+          if ty == 'col' then
+            vim.cmd.split()
+          else
+            vim.cmd.vsplit()
+          end
+        end
+        table.insert(win_queue, 1, vim.api.nvim_get_current_win())
+      end
+      for i, child_node in ipairs(node[2]) do
+        vim.api.nvim_set_current_win(win_queue[i])
+        set_layout(child_node)
+      end
+    end
+  end
+
+  local tab_win = vim.api.nvim_tabpage_get_win(tabpage)
+  vim.api.nvim_win_call(tab_win, function()
+    set_layout(layout)
+  end)
+end
+
 return vim
