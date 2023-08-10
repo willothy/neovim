@@ -3186,13 +3186,14 @@ nvim_tabpage_del_var({tabpage}, {name})               *nvim_tabpage_del_var()*
 
                                                    
 nvim_tabpage_get_layout({tabpage})                 *nvim_tabpage_get_layout()*
-    Returns the layout of a tabpage as a tree-structured Dictionary.
+    Returns the layout of a tabpage as a tree-like nested list
 
     Parameters: ~
-      • {tabpage}  Tabpage handle, or 0 for current tabpage
+      • {tabpage}  Tabpage handle, or 0 for the current tabpage
 
     Return: ~
-      • Tree of windows and frames in tabpage, or nil if invalid.
+      • Nested list of windows and frames in tabpage, or an 
+        empty array if the tab is invalid
 
 
 nvim_tabpage_get_number({tabpage})                 *nvim_tabpage_get_number()*
@@ -3240,6 +3241,16 @@ nvim_tabpage_list_wins({tabpage})                   *nvim_tabpage_list_wins()*
 
     Return: ~
         List of windows in `tabpage`
+
+
+nvim_tabpage_set_layout({tabpage}, {layout})       *nvim_tabpage_set_layout()*
+    Sets the window layout of a tabpage based on a tree of 
+    windows and frames
+
+    Parameters: ~
+      • {tabpage}  Tabpage handle, or 0 for the current tabpage
+      • {layout}   The intended layout as a nested list
+
 
                                                       *nvim_tabpage_set_var()*
 nvim_tabpage_set_var({tabpage}, {name}, {value})
