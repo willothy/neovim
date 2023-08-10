@@ -23,7 +23,7 @@
 ///
 /// @param tabpage Tabpage handle, or 0 for the current tabpage
 /// @param[out] err Error details, if any.
-/// @return Tree of windows and frames in `tabpage`, or an empty array if the tab is invalid
+/// @return Tree of windows and frames in tabpage, or an empty array if the tab is invalid
 Array nvim_tabpage_get_layout(Tabpage tabpage, Error *err)
   FUNC_API_SINCE(10)
 {
@@ -52,10 +52,10 @@ Array nvim_tabpage_get_layout(Tabpage tabpage, Error *err)
   return rv;
 }
 
-/// Sets the layout of a tabpage according to the given structure
+/// Sets the window layout of a tabpage based on a tree of windows and frames
 ///
 /// @param tabpage Tabpage handle, or 0 for the current tabpage
-/// @param layout Nested array structure representing window tree
+/// @param layout The intended layout as a nested list
 /// @param[out] err Error details, if any.
 void nvim_tabpage_set_layout(Tabpage tabpage, Array layout, Error *err)
   FUNC_API_SINCE(10)
