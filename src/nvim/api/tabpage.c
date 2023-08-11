@@ -57,10 +57,11 @@ Array nvim_tabpage_get_layout(Tabpage tabpage, Error *err)
 /// @param tabpage Tabpage handle, or 0 for the current tabpage
 /// @param layout The intended layout as a nested list
 /// @param[out] err Error details, if any.
-void nvim_tabpage_set_layout(Tabpage tabpage, Array layout, Error *err)
+void nvim_tabpage_set_layout(Tabpage tabpage, LuaRef layout, Error *err)
   FUNC_API_SINCE(10)
 {
   tabpage_T *tab;
+
   if (tabpage == 0) {
     tab = curtab;
   } else {
@@ -72,19 +73,27 @@ void nvim_tabpage_set_layout(Tabpage tabpage, Array layout, Error *err)
   }
 
   RedrawingDisabled++;
+  autocmd_no_enter++;
+  autocmd_no_leave++;
 
   FOR_ALL_WINDOWS_IN_TAB(wp, tab) {
-    if (wp != tab->tp_firstwin) {
-      win_close(wp, false, true);
+    if (wp != tab->tp_curwin) {
+      if (tab == curtab) {
+        win_close(wp, false, true);
+      } else {
+        win_close_othertab(wp, false, tab);
+      }
     }
   }
 
   MAXSIZE_TEMP_ARRAY(a, 2);
   ADD(a, TABPAGE_OBJ(tabpage));
-  ADD(a, ARRAY_OBJ(layout));
+  ADD(a, LUAREF_OBJ(layout));
 
   NLUA_EXEC_STATIC("vim._set_layout(...)", a, err);
 
+  autocmd_no_enter--;
+  autocmd_no_leave--;
   RedrawingDisabled--;
 }
 
@@ -168,6 +177,35 @@ void nvim_tabpage_del_var(Tabpage tabpage, String name, Error *err)
   }
 
   dict_set_var(tab->tp_vars, name, NIL, true, false, err);
+}
+
+/// Sets the current window in a tabpage
+///
+/// @param tabpage  Tabpage handle, or 0 for current tabpage
+/// @param win Window handle
+/// @param[out] err Error details, if any
+/// @return Window handle
+void nvim_tabpage_set_win(Tabpage tabpage, Window win, Error *err)
+  FUNC_API_SINCE(10)
+{
+  tabpage_T *tab = find_tab_by_handle(tabpage, err);
+
+  if (!tab) {
+    return;
+  }
+
+  if (tab == curtab) {
+    nvim_set_current_win(win, err);
+    return;
+  }
+
+  win_T *wp = find_window_by_handle(win, err);
+
+  if (!wp) {
+    return;
+  }
+
+  tab->tp_curwin = wp;
 }
 
 /// Gets the current window in a tabpage
