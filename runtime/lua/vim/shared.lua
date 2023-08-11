@@ -990,30 +990,42 @@ function vim._set_layout(tabpage, layout)
         buf = vim.fn.bufadd(buf)
         vim.api.nvim_buf_set_option(buf, 'buflisted', true)
       end
-      vim.api.nvim_set_current_buf(buf)
+      local win = vim.api.nvim_tabpage_get_win(tabpage)
+      vim.api.nvim_win_set_buf(win, buf)
+      if node.focused then
+        return win
+      end
     else
-      local win_queue = {}
+      local win_list = {}
       for i in ipairs(node[2]) do
         if i > 1 then
           if ty == 'col' then
-            vim.cmd.split()
+            vim.api.nvim_exec2('noautocmd split', {})
           else
-            vim.cmd.vsplit()
+            vim.api.nvim_exec2('noautocmd vsplit', {})
           end
         end
-        table.insert(win_queue, 1, vim.api.nvim_get_current_win())
+        table.insert(win_list, 1, vim.api.nvim_tabpage_get_win(tabpage))
       end
+      local focused
       for i, child_node in ipairs(node[2]) do
-        vim.api.nvim_set_current_win(win_queue[i])
-        set_layout(child_node)
+        vim.api.nvim_tabpage_set_win(tabpage, win_list[i])
+        local res = vim.api.nvim_win_call(win_list[i], function()
+          return set_layout(child_node)
+        end)
+        if res then
+          focused = res
+        end
       end
+      return focused
     end
   end
 
   local tab_win = vim.api.nvim_tabpage_get_win(tabpage)
-  vim.api.nvim_win_call(tab_win, function()
-    set_layout(layout)
+  local focus = vim.api.nvim_win_call(tab_win, function()
+    return set_layout(layout)
   end)
+  vim.api.nvim_tabpage_set_win(tabpage, focus)
 end
 
 return vim
