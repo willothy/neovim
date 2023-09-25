@@ -846,7 +846,7 @@ void win_config_float(win_T *wp, FloatConfig fconfig)
     fconfig.window = curwin->handle;
   } else if (fconfig.relative == kFloatRelativeMouse) {
     int row = mouse_row, col = mouse_col, grid = mouse_grid;
-    win_T *mouse_win = mouse_find_win(&grid, &row, &col);
+    win_T *mouse_win = mouse_find_win(&grid, &row, &col, false);
     if (mouse_win != NULL) {
       fconfig.relative = kFloatRelativeWindow;
       fconfig.row += row;

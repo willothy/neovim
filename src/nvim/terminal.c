@@ -1410,7 +1410,7 @@ static bool send_mouse_event(Terminal *term, int c)
 {
   int row = mouse_row, col = mouse_col, grid = mouse_grid;
   int offset;
-  win_T *mouse_win = mouse_find_win(&grid, &row, &col);
+  win_T *mouse_win = mouse_find_win(&grid, &row, &col, c == K_MOUSEMOVE || c == K_MOUSEUP);
   if (mouse_win == NULL || (offset = win_col_off(mouse_win)) > col) {
     goto end;
   }

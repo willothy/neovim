@@ -1794,7 +1794,7 @@ static void getchar_common(typval_T *argvars, typval_T *rettv)
         int winnr = 1;
         // Find the window at the mouse coordinates and compute the
         // text position.
-        win_T *const win = mouse_find_win(&grid, &row, &col);
+        win_T *const win = mouse_find_win(&grid, &row, &col, false);
         if (win == NULL) {
           return;
         }

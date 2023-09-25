@@ -265,11 +265,11 @@ void ui_comp_grid_cursor_goto(Integer grid_handle, Integer r, Integer c)
   ui_composed_call_grid_cursor_goto(1, cursor_row, cursor_col);
 }
 
-ScreenGrid *ui_comp_mouse_focus(int row, int col)
+ScreenGrid *ui_comp_mouse_focus(int row, int col, bool hover)
 {
   for (ssize_t i = (ssize_t)kv_size(layers) - 1; i > 0; i--) {
     ScreenGrid *grid = kv_A(layers, i);
-    if (grid->focusable
+    if ((grid->focusable || hover)
         && row >= grid->comp_row && row < grid->comp_row + grid->rows
         && col >= grid->comp_col && col < grid->comp_col + grid->cols) {
       return grid;
