@@ -889,6 +889,280 @@ describe('API/win', function()
          }))
       eq(wins_before, meths.list_wins())
     end)
+
+    it('creates a split window', function()
+      local win = meths.open_win(0, true, {
+        vertical = false
+      })
+      eq(meths.win_get_config(win).relative, '')
+    end)
+
+    it('creates split windows in the correct direction', function()
+      local initial_win = meths.get_current_win()
+      local win = meths.open_win(0, true, {
+        vertical = true,
+      })
+      eq(meths.win_get_config(win).relative, '')
+
+      local layout = meths.call_function('winlayout', {})
+
+      eq({
+        "row",
+        {
+          { 'leaf', win.id },
+          { 'leaf', initial_win.id },
+        }
+      }, layout)
+    end)
+
+    it("respects the 'split' option", function ()
+      local initial_win = meths.get_current_win()
+      local win = meths.open_win(0, true, {
+        split = "below",
+      })
+      eq(meths.win_get_config(win).relative, '')
+
+      local layout = meths.call_function('winlayout', {})
+
+      eq({
+        'col',
+        {
+          { 'leaf', initial_win.id },
+          { 'leaf', win.id }
+        }
+      }, layout)
+    end)
+
+    it('creates splits in the correct location', function()
+      local first_win = meths.get_current_win()
+      -- specifying window 0 should create a split next to the current window
+      local win = meths.open_win(0, true, {
+        vertical = false,
+      })
+      local layout = meths.call_function('winlayout', {})
+      eq(layout, {
+        'col',
+        {
+          { 'leaf', win.id, },
+          { 'leaf', first_win.id, },
+        },
+      })
+      -- not specifying a window should create a top-level split
+      local win2 = meths.open_win(0, true, {
+        split = "left",
+        win = -1
+      })
+      layout = meths.call_function('winlayout', {})
+      eq({
+        'row',
+        {
+          { 'leaf', win2.id },
+          {
+            'col',
+            {
+              { 'leaf', win.id },
+              { 'leaf', first_win.id },
+            }
+          }
+        },
+      }, layout)
+
+      -- specifying a window should create a split next to that window
+      local win3 = meths.open_win(0, true, {
+        win = win.id,
+        vertical = false
+      })
+      layout = meths.call_function('winlayout', {})
+      eq({
+        'row',
+        {
+          { 'leaf', win2.id },
+          {
+        'col',
+        {
+          { 'leaf', win3.id },
+          { 'leaf', win.id },
+          { 'leaf', first_win.id },
+        }
+          }
+        },
+      }, layout)
+    end)
+  end)
+
+  describe('set_config', function()
+    it('moves a split into a float', function()
+      local win = meths.open_win(0, true, {
+        vertical=false,
+      })
+      eq(meths.win_get_config(win).relative, '')
+      meths.win_set_config(win, {
+        relative = "editor",
+        row = 5,
+        col = 5,
+        width = 5,
+        height = 5,
+      })
+      eq(meths.win_get_config(win).relative, 'editor')
+    end)
+
+    it('throws error when attempting to split win into itself', function()
+      local err = pcall_err( meths.win_set_config, 0, {
+        vertical = false,
+      })
+      eq('Cannot split window into itself', err)
+    end)
+
+    it('passing retval of get_config results in no-op', function()
+      -- simple split layout
+      local win = meths.open_win(0, true, {
+        split = "left"
+      })
+      local layout = meths.call_function('winlayout', {})
+      local config = meths.win_get_config(win)
+      meths.win_set_config(win, config)
+      eq(layout, meths.call_function('winlayout', {}))
+
+      -- nested split layout
+      local win2 = meths.open_win(0, true, {
+        vertical = true,
+      })
+      local win3 = meths.open_win(0, true, {
+        win = win2,
+        vertical = false,
+      })
+      layout = meths.call_function('winlayout', {})
+      config = meths.win_get_config(win2)
+      meths.win_set_config(win2, config)
+      eq(layout, meths.call_function('winlayout', {}))
+
+      config = meths.win_get_config(win3)
+      meths.win_set_config(win3, config)
+      eq(layout, meths.call_function('winlayout', {}))
+    end)
+
+    it('moves a float into a split', function()
+      local layout = meths.call_function('winlayout', {})
+      eq(layout[1], 'leaf')
+      local win = meths.open_win(0, true, {
+        relative = "editor",
+        row = 5,
+        col = 5,
+        width = 5,
+        height = 5,
+      })
+      meths.win_set_config(win, {
+        split = "below",
+        win = -1
+      })
+      eq(meths.win_get_config(win).relative, '')
+      layout = meths.call_function('winlayout', {})
+      eq(layout[1], 'col')
+      eq(#layout[2], 2)
+      eq(layout[2][2][2], win.id)
+    end)
+
+    it('respects the "split" option', function()
+      local layout = meths.call_function('winlayout', {})
+      eq(layout[1], 'leaf')
+      local first_win = layout[2]
+      local win = meths.open_win(0, true, {
+        relative = "editor",
+        row = 5,
+        col = 5,
+        width = 5,
+        height = 5,
+      })
+      meths.win_set_config(win, {
+        split = "right",
+        win = first_win
+      })
+      layout = meths.call_function('winlayout', {})
+      eq(layout[1], 'row')
+      eq(#layout[2], 2)
+      eq(layout[2][2][2], win.id)
+      local config = meths.win_get_config(win)
+      eq(config.relative, '')
+      eq(config.split, 'right')
+      meths.win_set_config(win, {
+        split = "below",
+        win = first_win
+      })
+      layout = meths.call_function('winlayout', {})
+      eq(layout[1], 'col')
+      eq(#layout[2], 2)
+      eq(layout[2][2][2], win.id)
+      config = meths.win_get_config(win)
+      eq(config.relative, '')
+      eq(config.split, 'below')
+    end)
+
+    it('creates top-level splits', function()
+      local win = meths.open_win(0, true, {
+        vertical = false,
+      })
+      local win2 = meths.open_win(0, true, {
+        vertical = true,
+        win = -1
+      })
+      local layout = meths.call_function('winlayout', {})
+      eq(layout[1], 'row')
+      eq(#layout[2], 2)
+      eq(layout[2][1][2], win2.id)
+      meths.win_set_config(win, {
+        split = "below",
+        win = -1
+      })
+      layout = meths.call_function('winlayout', {})
+      eq(layout[1], 'col')
+      eq(#layout[2], 2)
+      eq(layout[2][1][1], 'row')
+      eq(layout[2][2][2], win.id)
+    end)
+
+    it('moves splits to other tabpages', function()
+      local curtab = meths.get_current_tabpage()
+      local win = meths.open_win(0, false, { split = 'left' })
+      command('tabnew')
+      local tabnr = meths.get_current_tabpage()
+      command('tabprev') -- return to the initial tab
+
+      meths.win_set_config(win, {
+        split = 'right',
+        win = meths.tabpage_get_win(tabnr)
+      })
+
+      eq(meths.win_get_tabpage(win), tabnr)
+      -- we are changing the config, the current tabpage should not change
+      eq(meths.get_current_tabpage(), curtab)
+
+      command('tabnext') -- switch to the new tabpage so we can get the layout
+      local layout = meths.call_function('winlayout', {})
+
+      eq({
+        'row',
+        {
+          { 'leaf', meths.tabpage_get_win(tabnr).id },
+          { 'leaf', win.id },
+        }
+      }, layout)
+    end)
+
+    it('splits windows in non-current tabpage', function()
+      local curtab = meths.get_current_tabpage()
+      command('tabnew')
+      local tabnr = meths.get_current_tabpage()
+      command('tabprev') -- return to the initial tab
+
+      local win = meths.open_win(0, false, {
+        vertical = false,
+        win = meths.tabpage_get_win(tabnr)
+      })
+
+      eq(meths.win_get_tabpage(win), tabnr)
+      -- since enter = false, the current tabpage should not change
+      eq(meths.get_current_tabpage(), curtab)
+    end)
   end)
 
   describe('get_config', function()
@@ -934,6 +1208,117 @@ describe('API/win', function()
       local cfg = meths.win_get_config(win)
       eq(title, cfg.title)
       eq(footer, cfg.footer)
+    end)
+
+
+    it("includes split for normal windows", function()
+      local win = meths.open_win(0, true, {
+        vertical = true,
+        win = -1
+      })
+      eq(meths.win_get_config(win).split, 'left')
+      meths.win_set_config(win, {
+        vertical = false,
+        win = -1
+      })
+      eq(meths.win_get_config(win).split, 'above')
+      meths.win_set_config(win, {
+        split = "below",
+        win = -1
+      })
+      eq(meths.win_get_config(win).split, 'below')
+    end)
+
+    it("includes split when splitting with ex commands", function()
+      local win = meths.get_current_win()
+      eq(meths.win_get_config(win).split, 'left')
+
+      command('vsplit')
+      local win2 = meths.get_current_win()
+
+      -- initial window now be marked as right split
+      -- since it was split with a vertical split
+      -- and 'splitright' is false by default
+      eq(meths.win_get_config(win).split, 'right')
+      eq(meths.win_get_config(win2).split, 'left')
+
+      meths.set_option_value('splitbelow', true, {
+        scope = "global"
+      })
+      meths.win_close(win, true)
+      command("split")
+      local win3 = meths.get_current_win()
+      eq(meths.win_get_config(win3).split, 'below')
+    end)
+
+    it("includes the correct 'split' option in complex layouts", function()
+      local initial_win = meths.get_current_win()
+      local win = meths.open_win(0, false, {
+        split = "right",
+        win = -1
+      })
+
+      local win2 = meths.open_win(0, false, {
+        split = "below",
+        win = win,
+      })
+
+      meths.win_set_config(win2, {
+        width = 50,
+      })
+
+      meths.win_set_config(win, {
+        split = "left",
+        win = -1
+      })
+
+      local win3 = meths.open_win(0, false, {
+        split = "above",
+        win = -1
+      })
+      local float = meths.open_win(0, false, {
+        relative = "editor",
+        width = 40,
+        height = 20,
+        col = 20,
+        row = 10,
+      })
+      meths.win_set_config(float, {
+        split = "right",
+        win = -1
+      })
+
+      local layout = meths.call_function('winlayout', {})
+
+      eq({
+        'row',
+        {
+          {
+            'col',
+            {
+              { 'leaf', win3.id },
+              {
+                'row',
+                {
+                  { 'leaf', win.id },
+                  { 'leaf', initial_win.id },
+                  { 'leaf', win2.id }
+                }
+              }
+            }
+          },
+          {
+            'leaf',
+            float.id,
+          }
+        }
+      }, layout)
+
+      eq(meths.win_get_config(win3).split, 'above')
+      eq(meths.win_get_config(win).split, 'left')
+      eq(meths.win_get_config(initial_win).split, 'left')
+      eq(meths.win_get_config(win2).split, 'right')
+      eq(meths.win_get_config(float).split, 'right')
     end)
   end)
 end)

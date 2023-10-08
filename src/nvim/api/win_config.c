@@ -16,6 +16,7 @@
 #include "nvim/buffer_defs.h"
 #include "nvim/decoration.h"
 #include "nvim/drawscreen.h"
+#include "nvim/eval/window.h"
 #include "nvim/extmark_defs.h"
 #include "nvim/globals.h"
 #include "nvim/grid.h"
@@ -27,15 +28,16 @@
 #include "nvim/pos.h"
 #include "nvim/syntax.h"
 #include "nvim/ui.h"
+#include "nvim/ui_compositor.h"
 #include "nvim/window.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "api/win_config.c.generated.h"
 #endif
 
-/// Open a new window.
+/// Opens a new split window, or a floating window if `relative` is specified,
+/// or an external window (managed by the UI) if `external` is specified.
 ///
-/// Currently this is used to open floating and external windows.
 /// Floats are windows that are drawn above the split layout, at some anchor
 /// position in some other window. Floats can be drawn internally or by external
 /// GUI with the |ui-multigrid| extension. External windows are only supported
@@ -43,8 +45,16 @@
 ///
 /// For a general overview of floats, see |api-floatwin|.
 ///
-/// Exactly one of `external` and `relative` must be specified. The `width` and
-/// `height` of the new window must be specified.
+/// The `width` and `height` of the new window must be specified when opening
+/// a floating window, but are optional for normal windows.
+///
+/// If `relative` and `external` are omitted, a normal "split" window is created.
+/// The `win` property determines which window will be split. If no `win` is
+/// provided, a window will be created adjacent to the current window. If -1 is
+/// provided, a top-level split will be created. `vertical` and `split` are only
+/// valid for normal windows, and are used to control split direction.
+/// Split windows cannot have `bufpos`/`row`/`col`/`border`/`title`/`footer`
+/// properties.
 ///
 /// With relative=editor (row=0,col=0) refers to the top-left corner of the
 /// screen-grid and (row=Lines-1,col=Columns-1) refers to the bottom-right
@@ -72,6 +82,15 @@
 /// })
 /// ```
 ///
+/// Example (Lua): vertical split left of the current window
+///
+/// ```lua
+/// vim.api.nvim_open_win(0, false, {
+///   split = 'left',
+///   win = 0
+/// })
+/// ```
+///
 /// @param buffer Buffer to display, or 0 for current buffer
 /// @param enter  Enter the window (make it the current window)
 /// @param config Map defining the window configuration. Keys:
@@ -81,7 +100,8 @@
 ///      - "win"    Window given by the `win` field, or current window.
 ///      - "cursor" Cursor position in current window.
 ///      - "mouse"  Mouse position
-///   - win: |window-ID| for relative="win".
+///   - win: |window-ID| window to split, or relative window when creating a
+///      float (relative="win").
 ///   - anchor: Decides which corner of the float to place at (row,col):
 ///      - "NW" northwest (default)
 ///      - "NE" northeast
@@ -168,13 +188,14 @@
 ///   - fixed: If true when anchor is NW or SW, the float window
 ///            would be kept fixed even if the window would be truncated.
 ///   - hide: If true the floating window will be hidden.
+///   - vertical: Split vertically |:vertical|.
+///   - split: Split direction: "left", "right", "above", "below".
 ///
 /// @param[out] err Error details, if any
 ///
 /// @return Window handle, or 0 on error
 Window nvim_open_win(Buffer buffer, Boolean enter, Dict(float_config) *config, Error *err)
-  FUNC_API_SINCE(6)
-  FUNC_API_TEXTLOCK_ALLOW_CMDWIN
+  FUNC_API_SINCE(6) FUNC_API_TEXTLOCK_ALLOW_CMDWIN
 {
   buf_T *buf = find_buffer_by_handle(buffer, err);
   if (!buf) {
@@ -185,11 +206,56 @@ Window nvim_open_win(Buffer buffer, Boolean enter, Dict(float_config) *config, E
     return 0;
   }
 
-  FloatConfig fconfig = FLOAT_CONFIG_INIT;
+  WinConfig fconfig = WIN_CONFIG_INIT;
   if (!parse_float_config(config, &fconfig, false, true, err)) {
     return 0;
   }
-  win_T *wp = win_new_float(NULL, false, fconfig, err);
+
+  bool is_split = HAS_KEY(config, float_config, split) || HAS_KEY(config, float_config, vertical);
+
+  win_T *wp = NULL;
+  if (is_split) {
+    win_T *parent = NULL;
+    if (!HAS_KEY(config, float_config, win) || config->win != -1) {
+      parent = find_window_by_handle(fconfig.window, err);
+      if (!parent) {
+        return 0;
+      } else if (parent->w_floating) {
+        api_set_error(err, kErrorTypeException, "Cannot split a floating window");
+        return 0;
+      }
+    }
+
+    if (HAS_KEY(config, float_config, vertical) && !HAS_KEY(config, float_config, split)) {
+      if (config->vertical) {
+        fconfig.split = p_spr ? kWinSplitRight : kWinSplitLeft;
+      } else {
+        fconfig.split = p_sb ? kWinSplitBelow : kWinSplitAbove;
+      }
+    }
+    int flags = parse_config_split_flags(fconfig.split, parent == NULL);
+
+    if (parent == NULL) {
+      wp = win_split_ins(0, flags, NULL, 0);
+    } else {
+      tabpage_T *tp = win_find_tabpage(parent);
+      tabpage_T *old_curtab = curtab;
+      RedrawingDisabled++;
+      if (tp->handle != curtab->handle) {
+        goto_tabpage_tp(tp, false, false);
+      }
+      WIN_EXECUTE(parent, tp, {
+        wp = win_split_ins(0, flags, NULL, 0);
+      });
+      if (!enter && tp->handle != old_curtab->handle) {
+        goto_tabpage_tp(old_curtab, true, false);
+      }
+      RedrawingDisabled--;
+    }
+    wp->w_config = fconfig;
+  } else {
+    wp = win_new_float(NULL, false, fconfig, err);
+  }
   if (!wp) {
     return 0;
   }
@@ -197,14 +263,14 @@ Window nvim_open_win(Buffer buffer, Boolean enter, Dict(float_config) *config, E
     win_enter(wp, false);
   }
   // autocmds in win_enter or win_set_buf below may close the window
-  if (win_valid(wp) && buffer > 0) {
+  if (win_valid_any_tab(wp) && (buffer > 0 || is_split)) {
     Boolean noautocmd = !enter || fconfig.noautocmd;
     win_set_buf(wp, buf, noautocmd, err);
     if (!fconfig.noautocmd) {
       apply_autocmds(EVENT_WINNEW, NULL, NULL, false, buf);
     }
   }
-  if (!win_valid(wp)) {
+  if (!win_valid_any_tab(wp)) {
     api_set_error(err, kErrorTypeException, "Window was closed immediately");
     return 0;
   }
@@ -214,6 +280,20 @@ Window nvim_open_win(Buffer buffer, Boolean enter, Dict(float_config) *config, E
     didset_window_options(wp, true);
   }
   return wp->handle;
+}
+
+static WinSplit win_split_dir(win_T *win)
+{
+  if (win->w_frame == NULL || win->w_frame->fr_parent == NULL) {
+    return kWinSplitLeft;
+  }
+
+  char layout = win->w_frame->fr_parent->fr_layout;
+  if (layout == FR_COL) {
+    return win->w_frame->fr_next ? kWinSplitAbove : kWinSplitBelow;
+  } else {
+    return win->w_frame->fr_next ? kWinSplitLeft : kWinSplitRight;
+  }
 }
 
 /// Configures window layout. Currently only for floating and external windows
@@ -235,18 +315,115 @@ void nvim_win_set_config(Window window, Dict(float_config) *config, Error *err)
   if (!win) {
     return;
   }
-  bool new_float = !win->w_floating;
+  bool was_normal = !win->w_floating;
+  bool has_split = HAS_KEY(config, float_config, split);
+  bool has_vertical = HAS_KEY(config, float_config, vertical);
   // reuse old values, if not overridden
-  FloatConfig fconfig = new_float ? FLOAT_CONFIG_INIT : win->w_float_config;
+  WinConfig fconfig = win->w_config;
 
-  if (!parse_float_config(config, &fconfig, !new_float, false, err)) {
+  bool is_split = (!HAS_KEY(config, float_config, relative) || striequal(config->relative.data, ""))
+                  && ((!HAS_KEY(config, float_config,
+                                external) && !fconfig.external) || !config->external)
+                  && (has_split || has_vertical || was_normal);
+
+  if (!parse_float_config(config, &fconfig, !was_normal || is_split, false, err)) {
     return;
   }
-  if (new_float) {
+  if (was_normal && !is_split) {
     if (!win_new_float(win, false, fconfig, err)) {
       return;
     }
     redraw_later(win, UPD_NOT_VALID);
+  } else if (is_split) {
+    win_T *parent = NULL;
+    if (!HAS_KEY(config, float_config, win) || config->win != -1) {
+      parent = find_window_by_handle(fconfig.window, err);
+      if (!parent) {
+        return;
+      } else if (parent->w_floating) {
+        api_set_error(err, kErrorTypeException, "Cannot split a floating window");
+        return;
+      }
+    }
+
+    WinSplit old_split = win_split_dir(win);
+    if (has_vertical && !has_split) {
+      if (config->vertical) {
+        if (old_split == kWinSplitRight || p_spr) {
+          fconfig.split = kWinSplitRight;
+        } else {
+          fconfig.split = kWinSplitLeft;
+        }
+      } else {
+        if (old_split == kWinSplitBelow || p_sb) {
+          fconfig.split = kWinSplitBelow;
+        } else {
+          fconfig.split = kWinSplitAbove;
+        }
+      }
+    }
+    win->w_config = fconfig;
+
+    // If there's no vertical or split set, or if the split is the same as the old split,
+    // then we can just change the size of the window.
+    if ((!has_vertical && !has_split)
+        || (was_normal
+            && !HAS_KEY(config, float_config,
+                        win) && ((!has_split && !has_vertical) || old_split == fconfig.split))) {
+      if (HAS_KEY(config, float_config, width)) {
+        win_setwidth_win(fconfig.width, win);
+      }
+      if (HAS_KEY(config, float_config, height)) {
+        win_setheight_win(fconfig.height, win);
+      }
+      redraw_later(win, UPD_NOT_VALID);
+      return;
+    }
+
+    if (was_normal) {
+      // If the window is the last in the tabpage or `fconfig.win` is
+      // a handle to itself, we can't split it.
+      if (win->w_frame->fr_parent == NULL || (parent != NULL && parent->handle == win->handle)) {
+        api_set_error(err, kErrorTypeValidation, "Cannot split window into itself");
+        return;
+      }
+      int dir;
+      winframe_remove(win, &dir, NULL);
+      win_remove(win, NULL);
+    } else {
+      // Remove the old window from the tree of frames
+      win_remove(win, NULL);
+      ui_comp_remove_grid(&win->w_grid_alloc);
+      if (win->w_config.external) {
+        for (tabpage_T *tp = first_tabpage; tp != NULL; tp = tp->tp_next) {
+          if (tp == curtab) {
+            continue;
+          }
+          if (tp->tp_curwin == win) {
+            tp->tp_curwin = tp->tp_firstwin;
+          }
+        }
+      }
+      win->w_pos_changed = true;
+    }
+
+    int flags = parse_config_split_flags(fconfig.split, parent == NULL);
+
+    if (parent == NULL) {
+      win_split_ins(0, flags, win, 0);
+    } else {
+      WIN_EXECUTE(parent, win_find_tabpage(parent), {
+        win_split_ins(0, flags, win, 0);
+      });
+    }
+    if (HAS_KEY(config, float_config, width)) {
+      win_setwidth_win(fconfig.width, win);
+    }
+    if (HAS_KEY(config, float_config, height)) {
+      win_setheight_win(fconfig.height, win);
+    }
+    redraw_later(win, UPD_NOT_VALID);
+    return;
   } else {
     win_config_float(win, fconfig);
     win->w_pos_changed = true;
@@ -259,7 +436,7 @@ void nvim_win_set_config(Window window, Dict(float_config) *config, Error *err)
   }
 }
 
-Dictionary config_put_bordertext(Dictionary config, FloatConfig *fconfig,
+Dictionary config_put_bordertext(Dictionary config, WinConfig *fconfig,
                                  BorderTextType bordertext_type)
 {
   VirtText vt;
@@ -320,7 +497,7 @@ Dictionary nvim_win_get_config(Window window, Error *err)
     return rv;
   }
 
-  FloatConfig *config = &wp->w_float_config;
+  WinConfig *config = &wp->w_config;
 
   PUT(rv, "focusable", BOOLEAN_OBJ(config->focusable));
   PUT(rv, "external", BOOLEAN_OBJ(config->external));
@@ -369,13 +546,36 @@ Dictionary nvim_win_get_config(Window window, Error *err)
         rv = config_put_bordertext(rv, config, kBorderTextFooter);
       }
     }
+  } else if (!config->external) {
+    PUT(rv, "width", INTEGER_OBJ(wp->w_width));
+    PUT(rv, "height", INTEGER_OBJ(wp->w_height));
+    WinSplit split = win_split_dir(wp);
+    PUT(rv, "split", CSTR_TO_OBJ(win_split_str[split]));
   }
 
-  const char *rel = (wp->w_floating && !config->external
-                     ? float_relative_str[config->relative] : "");
-  PUT(rv, "relative", CSTR_TO_OBJ(rel));
+  if (wp->w_floating && !config->external) {
+    PUT(rv, "relative", CSTR_TO_OBJ(float_relative_str[config->relative]));
+  } else {
+    PUT(rv, "relative", CSTR_TO_OBJ(""));
+  }
 
   return rv;
+}
+
+static int parse_config_split_flags(WinSplit split, bool toplevel)
+{
+  int flags = 0;
+  if (split == kWinSplitAbove || split == kWinSplitBelow) {
+    flags |= WSP_HOR;
+  } else {
+    flags |= WSP_VERT;
+  }
+  if (split == kWinSplitAbove || split == kWinSplitLeft) {
+    flags |= toplevel ? WSP_TOP : WSP_ABOVE;
+  } else {
+    flags |= toplevel ? WSP_BOT : WSP_BELOW;
+  }
+  return flags;
 }
 
 static bool parse_float_anchor(String anchor, FloatAnchor *out)
@@ -415,10 +615,26 @@ static bool parse_float_relative(String relative, FloatRelative *out)
   return true;
 }
 
+static bool parse_config_split(String split, WinSplit *out)
+{
+  char *str = split.data;
+  if (striequal(str, "left")) {
+    *out = kWinSplitLeft;
+  } else if (striequal(str, "right")) {
+    *out = kWinSplitRight;
+  } else if (striequal(str, "above")) {
+    *out = kWinSplitAbove;
+  } else if (striequal(str, "below")) {
+    *out = kWinSplitBelow;
+  } else {
+    return false;
+  }
+  return true;
+}
+
 static bool parse_float_bufpos(Array bufpos, lpos_T *out)
 {
-  if (bufpos.size != 2
-      || bufpos.items[0].type != kObjectTypeInteger
+  if (bufpos.size != 2 || bufpos.items[0].type != kObjectTypeInteger
       || bufpos.items[1].type != kObjectTypeInteger) {
     return false;
   }
@@ -427,8 +643,8 @@ static bool parse_float_bufpos(Array bufpos, lpos_T *out)
   return true;
 }
 
-static void parse_bordertext(Object bordertext, BorderTextType bordertext_type,
-                             FloatConfig *fconfig, Error *err)
+static void parse_bordertext(Object bordertext, BorderTextType bordertext_type, WinConfig *fconfig,
+                             Error *err)
 {
   bool *is_present;
   VirtText *chunks;
@@ -478,7 +694,7 @@ static void parse_bordertext(Object bordertext, BorderTextType bordertext_type,
 }
 
 static bool parse_bordertext_pos(String bordertext_pos, BorderTextType bordertext_type,
-                                 FloatConfig *fconfig, Error *err)
+                                 WinConfig *fconfig, Error *err)
 {
   AlignTextPos *align;
   switch (bordertext_type) {
@@ -517,7 +733,7 @@ static bool parse_bordertext_pos(String bordertext_pos, BorderTextType bordertex
   return true;
 }
 
-static void parse_border_style(Object style,  FloatConfig *fconfig, Error *err)
+static void parse_border_style(Object style, WinConfig *fconfig, Error *err)
 {
   struct {
     const char *name;
@@ -532,7 +748,7 @@ static void parse_border_style(Object style,  FloatConfig *fconfig, Error *err)
     { NULL, { { NUL } }, false },
   };
 
-  char (*chars)[MAX_SCHAR_SIZE] = fconfig->border_chars;
+  char(*chars)[MAX_SCHAR_SIZE] = fconfig->border_chars;
   int *hl_ids = fconfig->border_hl_ids;
 
   fconfig->border = true;
@@ -541,8 +757,7 @@ static void parse_border_style(Object style,  FloatConfig *fconfig, Error *err)
     Array arr = style.data.array;
     size_t size = arr.size;
     if (!size || size > 8 || (size & (size - 1))) {
-      api_set_error(err, kErrorTypeValidation,
-                    "invalid number of border chars");
+      api_set_error(err, kErrorTypeValidation, "invalid number of border chars");
       return;
     }
     for (size_t i = 0; i < size; i++) {
@@ -572,10 +787,8 @@ static void parse_border_style(Object style,  FloatConfig *fconfig, Error *err)
         api_set_error(err, kErrorTypeValidation, "invalid border char");
         return;
       }
-      if (string.size
-          && mb_string2cells_len(string.data, string.size) > 1) {
-        api_set_error(err, kErrorTypeValidation,
-                      "border chars must be one cell");
+      if (string.size && mb_string2cells_len(string.data, string.size) > 1) {
+        api_set_error(err, kErrorTypeValidation, "border chars must be one cell");
         return;
       }
       size_t len = MIN(string.size, sizeof(*chars) - 1);
@@ -590,12 +803,10 @@ static void parse_border_style(Object style,  FloatConfig *fconfig, Error *err)
       memcpy(hl_ids + size, hl_ids, sizeof(*hl_ids) * size);
       size <<= 1;
     }
-    if ((chars[7][0] && chars[1][0] && !chars[0][0])
-        || (chars[1][0] && chars[3][0] && !chars[2][0])
+    if ((chars[7][0] && chars[1][0] && !chars[0][0]) || (chars[1][0] && chars[3][0] && !chars[2][0])
         || (chars[3][0] && chars[5][0] && !chars[4][0])
         || (chars[5][0] && chars[7][0] && !chars[6][0])) {
-      api_set_error(err, kErrorTypeValidation,
-                    "corner between used edges must be specified");
+      api_set_error(err, kErrorTypeValidation, "corner between used edges must be specified");
     }
   } else if (style.type == kObjectTypeString) {
     String str = style.data.string;
@@ -622,26 +833,24 @@ static void parse_border_style(Object style,  FloatConfig *fconfig, Error *err)
         return;
       }
     }
-    api_set_error(err, kErrorTypeValidation,
-                  "invalid border style \"%s\"", str.data);
+    api_set_error(err, kErrorTypeValidation, "invalid border style \"%s\"", str.data);
   }
 }
 
-static bool parse_float_config(Dict(float_config) *config, FloatConfig *fconfig, bool reconf,
+static bool parse_float_config(Dict(float_config) *config, WinConfig *fconfig, bool reconf,
                                bool new_win, Error *err)
 {
 #define HAS_KEY_X(d, key) HAS_KEY(d, float_config, key)
-  bool has_relative = false, relative_is_win = false;
-  // ignore empty string, to match nvim_win_get_config
-  if (HAS_KEY_X(config, relative) && config->relative.size > 0) {
+  bool has_relative = false, relative_is_win = false, is_split = false;
+  if (HAS_KEY_X(config, relative) && !striequal(config->relative.data, "")) {
     if (!parse_float_relative(config->relative, &fconfig->relative)) {
       api_set_error(err, kErrorTypeValidation, "Invalid value of 'relative' key");
       return false;
     }
 
-    if (!(HAS_KEY_X(config, row) && HAS_KEY_X(config, col)) && !HAS_KEY_X(config, bufpos)) {
-      api_set_error(err, kErrorTypeValidation,
-                    "'relative' requires 'row'/'col' or 'bufpos'");
+    if (config->relative.size > 0 && !(HAS_KEY_X(config, row) && HAS_KEY_X(config, col))
+        && !HAS_KEY_X(config, bufpos)) {
+      api_set_error(err, kErrorTypeValidation, "'relative' requires 'row'/'col' or 'bufpos'");
       return false;
     }
 
@@ -650,6 +859,32 @@ static bool parse_float_config(Dict(float_config) *config, FloatConfig *fconfig,
     if (fconfig->relative == kFloatRelativeWindow) {
       relative_is_win = true;
       fconfig->bufpos.lnum = -1;
+    }
+  } else if (!HAS_KEY_X(config, external) || !config->external) {
+    if (HAS_KEY_X(config, vertical) || HAS_KEY_X(config, split)) {
+      is_split = true;
+    } else if (new_win) {
+      api_set_error(err, kErrorTypeValidation,
+                    "Must specify 'relative' or 'external' when creating a float");
+      return false;
+    }
+  }
+
+  if (HAS_KEY_X(config, vertical)) {
+    if (!is_split) {
+      api_set_error(err, kErrorTypeValidation, "floating windows cannot have 'vertical'");
+      return false;
+    }
+  }
+
+  if (HAS_KEY_X(config, split)) {
+    if (!is_split) {
+      api_set_error(err, kErrorTypeValidation, "floating windows cannot have 'split'");
+      return false;
+    }
+    if (!parse_config_split(config->split, &fconfig->split)) {
+      api_set_error(err, kErrorTypeValidation, "Invalid value of 'split' key");
+      return false;
     }
   }
 
@@ -661,7 +896,7 @@ static bool parse_float_config(Dict(float_config) *config, FloatConfig *fconfig,
   }
 
   if (HAS_KEY_X(config, row)) {
-    if (!has_relative) {
+    if (!has_relative || is_split) {
       api_set_error(err, kErrorTypeValidation, "non-float cannot have 'row'");
       return false;
     }
@@ -669,7 +904,7 @@ static bool parse_float_config(Dict(float_config) *config, FloatConfig *fconfig,
   }
 
   if (HAS_KEY_X(config, col)) {
-    if (!has_relative) {
+    if (!has_relative || is_split) {
       api_set_error(err, kErrorTypeValidation, "non-float cannot have 'col'");
       return false;
     }
@@ -677,7 +912,7 @@ static bool parse_float_config(Dict(float_config) *config, FloatConfig *fconfig,
   }
 
   if (HAS_KEY_X(config, bufpos)) {
-    if (!has_relative) {
+    if (!has_relative || is_split) {
       api_set_error(err, kErrorTypeValidation, "non-float cannot have 'bufpos'");
       return false;
     } else {
@@ -702,7 +937,7 @@ static bool parse_float_config(Dict(float_config) *config, FloatConfig *fconfig,
       api_set_error(err, kErrorTypeValidation, "'width' key must be a positive Integer");
       return false;
     }
-  } else if (!reconf) {
+  } else if (!reconf && !is_split) {
     api_set_error(err, kErrorTypeValidation, "Must specify 'width'");
     return false;
   }
@@ -714,21 +949,22 @@ static bool parse_float_config(Dict(float_config) *config, FloatConfig *fconfig,
       api_set_error(err, kErrorTypeValidation, "'height' key must be a positive Integer");
       return false;
     }
-  } else if (!reconf) {
+  } else if (!reconf && !is_split) {
     api_set_error(err, kErrorTypeValidation, "Must specify 'height'");
     return false;
   }
 
-  if (relative_is_win) {
+  if (relative_is_win || is_split) {
     fconfig->window = curwin->handle;
     if (HAS_KEY_X(config, win)) {
       if (config->win > 0) {
         fconfig->window = config->win;
       }
     }
-  } else {
+  } else if (has_relative) {
     if (HAS_KEY_X(config, win)) {
-      api_set_error(err, kErrorTypeValidation, "'win' key is only valid with relative='win'");
+      api_set_error(err, kErrorTypeValidation,
+                    "'win' key is only valid with relative='win' and relative=''");
       return false;
     }
   }
@@ -741,16 +977,9 @@ static bool parse_float_config(Dict(float_config) *config, FloatConfig *fconfig,
       return false;
     }
     if (fconfig->external && !ui_has(kUIMultigrid)) {
-      api_set_error(err, kErrorTypeValidation,
-                    "UI doesn't support external windows");
+      api_set_error(err, kErrorTypeValidation, "UI doesn't support external windows");
       return false;
     }
-  }
-
-  if (!reconf && (!has_relative && !fconfig->external)) {
-    api_set_error(err, kErrorTypeValidation,
-                  "One of 'relative' and 'external' must be used");
-    return false;
   }
 
   if (HAS_KEY_X(config, focusable)) {
@@ -758,6 +987,10 @@ static bool parse_float_config(Dict(float_config) *config, FloatConfig *fconfig,
   }
 
   if (HAS_KEY_X(config, zindex)) {
+    if (is_split) {
+      api_set_error(err, kErrorTypeValidation, "non-float cannot have 'zindex'");
+      return false;
+    }
     if (config->zindex > 0) {
       fconfig->zindex = (int)config->zindex;
     } else {
@@ -767,6 +1000,10 @@ static bool parse_float_config(Dict(float_config) *config, FloatConfig *fconfig,
   }
 
   if (HAS_KEY_X(config, title)) {
+    if (is_split) {
+      api_set_error(err, kErrorTypeValidation, "non-float cannot have 'title'");
+      return false;
+    }
     // title only work with border
     if (!HAS_KEY_X(config, border) && !fconfig->border) {
       api_set_error(err, kErrorTypeException, "title requires border to be set");
@@ -794,6 +1031,10 @@ static bool parse_float_config(Dict(float_config) *config, FloatConfig *fconfig,
   }
 
   if (HAS_KEY_X(config, footer)) {
+    if (is_split) {
+      api_set_error(err, kErrorTypeValidation, "non-float cannot have 'footer'");
+      return false;
+    }
     // footer only work with border
     if (!HAS_KEY_X(config, border) && !fconfig->border) {
       api_set_error(err, kErrorTypeException, "footer requires border to be set");
@@ -821,6 +1062,10 @@ static bool parse_float_config(Dict(float_config) *config, FloatConfig *fconfig,
   }
 
   if (HAS_KEY_X(config, border)) {
+    if (is_split) {
+      api_set_error(err, kErrorTypeValidation, "non-float cannot have 'border'");
+      return false;
+    }
     parse_border_style(config->border, fconfig, err);
     if (ERROR_SET(err)) {
       return false;

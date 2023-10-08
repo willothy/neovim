@@ -926,6 +926,16 @@ EXTERN const char *const float_relative_str[] INIT(= { "editor", "win",
                                                        "cursor", "mouse" });
 
 typedef enum {
+  kWinSplitLeft = 0,
+  kWinSplitRight = 1,
+  kWinSplitAbove = 2,
+  kWinSplitBelow = 3,
+} WinSplit;
+
+EXTERN const char *const win_split_str[] INIT(= { "left", "right",
+                                                  "above", "below" });
+
+typedef enum {
   kWinStyleUnused = 0,
   kWinStyleMinimal,  /// Minimal UI: no number column, eob markers, etc
 } WinStyle;
@@ -950,6 +960,7 @@ typedef struct {
   FloatRelative relative;
   bool external;
   bool focusable;
+  WinSplit split;
   int zindex;
   WinStyle style;
   bool border;
@@ -968,18 +979,19 @@ typedef struct {
   bool noautocmd;
   bool fixed;
   bool hide;
-} FloatConfig;
+} WinConfig;
 
-#define FLOAT_CONFIG_INIT ((FloatConfig){ .height = 0, .width = 0, \
-                                          .bufpos = { -1, 0 }, \
-                                          .row = 0, .col = 0, .anchor = 0, \
-                                          .relative = 0, .external = false, \
-                                          .focusable = true, \
-                                          .zindex = kZIndexFloatDefault, \
-                                          .style = kWinStyleUnused, \
-                                          .noautocmd = false, \
-                                          .hide = false, \
-                                          .fixed = false })
+#define WIN_CONFIG_INIT ((WinConfig){ .height = 0, .width = 0, \
+                                      .bufpos = { -1, 0 }, \
+                                      .row = 0, .col = 0, .anchor = 0, \
+                                      .relative = 0, .external = false, \
+                                      .focusable = true, \
+                                      .split = 0, \
+                                      .zindex = kZIndexFloatDefault, \
+                                      .style = kWinStyleUnused, \
+                                      .noautocmd = false, \
+                                      .hide = false, \
+                                      .fixed = false })
 
 // Structure to store last cursor position and topline.  Used by check_lnums()
 // and reset_lnums().
@@ -1301,7 +1313,7 @@ struct window_S {
   ScreenGrid w_grid_alloc;              // the grid specific to the window
   bool w_pos_changed;                   // true if window position changed
   bool w_floating;                       ///< whether the window is floating
-  FloatConfig w_float_config;
+  WinConfig w_config;
 
   // w_fraction is the fractional row of the cursor within the window, from
   // 0 at the top row to FRACTION_MULT at the last row.

@@ -1175,11 +1175,11 @@ describe('float window', function()
       local expected = {anchor='NW', col=5, external=false, focusable=true, height=2, relative='editor', row=3, width=20, zindex=60, hide=false}
       eq(expected, meths.win_get_config(win))
 
-      eq({relative='', external=false, focusable=true, hide=false}, meths.win_get_config(0))
+      eq({external=false, focusable=true, hide=false, relative='',split="left",width=40,height=6}, meths.win_get_config(0))
 
       if multigrid then
         meths.win_set_config(win, {external=true, width=10, height=1})
-        eq({external=true,focusable=true,width=10,height=1,relative='',hide=false}, meths.win_get_config(win))
+        eq({external=true,focusable=true,width=10,height=1,hide=false,relative=''}, meths.win_get_config(win))
       end
     end)
 
@@ -3385,8 +3385,12 @@ describe('float window', function()
       local buf = meths.create_buf(false,false)
       eq("Invalid key: 'bork'",
          pcall_err(meths.open_win,buf, false, {width=20,height=2,bork=true}))
-      eq("'win' key is only valid with relative='win'",
+      eq("'win' key is only valid with relative='win' and relative=''",
          pcall_err(meths.open_win,buf, false, {width=20,height=2,relative='editor',row=0,col=0,win=0}))
+      eq("floating windows cannot have 'vertical'",
+          pcall_err(meths.open_win,buf, false, {width=20,height=2,relative='editor',row=0,col=0,vertical=true}))
+      eq("floating windows cannot have 'split'",
+          pcall_err(meths.open_win,buf, false, {width=20,height=2,relative='editor',row=0,col=0,split="left"}))
       eq("Only one of 'relative' and 'external' must be used",
          pcall_err(meths.open_win,buf, false, {width=20,height=2,relative='editor',row=0,col=0,external=true}))
       eq("Invalid value of 'relative' key",
