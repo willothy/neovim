@@ -211,7 +211,7 @@ Window nvim_open_win(Buffer buffer, Boolean enter, Dict(float_config) *config, E
     return 0;
   }
 
-  bool is_split = HAS_KEY(config, float_config, split) || HAS_KEY(config, float_config, vertical);
+  bool is_split = !HAS_KEY(config, float_config, external) && !HAS_KEY(config, float_config, relative);
 
   win_T *wp = NULL;
   if (is_split) {
@@ -226,13 +226,6 @@ Window nvim_open_win(Buffer buffer, Boolean enter, Dict(float_config) *config, E
       }
     }
 
-    if (HAS_KEY(config, float_config, vertical) && !HAS_KEY(config, float_config, split)) {
-      if (config->vertical) {
-        fconfig.split = p_spr ? kWinSplitRight : kWinSplitLeft;
-      } else {
-        fconfig.split = p_sb ? kWinSplitBelow : kWinSplitAbove;
-      }
-    }
     int flags = parse_config_split_flags(fconfig.split, parent == NULL);
 
     if (parent == NULL) {
@@ -861,12 +854,8 @@ static bool parse_float_config(Dict(float_config) *config, WinConfig *fconfig, b
       fconfig->bufpos.lnum = -1;
     }
   } else if (!HAS_KEY_X(config, external) || !config->external) {
-    if (HAS_KEY_X(config, vertical) || HAS_KEY_X(config, split)) {
+    if (HAS_KEY_X(config, vertical) || HAS_KEY_X(config, split) || new_win) {
       is_split = true;
-    } else if (new_win) {
-      api_set_error(err, kErrorTypeValidation,
-                    "Must specify 'relative' or 'external' when creating a float");
-      return false;
     }
   }
 
@@ -885,6 +874,16 @@ static bool parse_float_config(Dict(float_config) *config, WinConfig *fconfig, b
     if (!parse_config_split(config->split, &fconfig->split)) {
       api_set_error(err, kErrorTypeValidation, "Invalid value of 'split' key");
       return false;
+    }
+  } else if (is_split) {
+    if (HAS_KEY_X(config, vertical)) {
+      if (config->vertical) {
+        fconfig->split = p_spr ? kWinSplitRight : kWinSplitLeft;
+      } else {
+        fconfig->split = p_sb ? kWinSplitBelow : kWinSplitAbove;
+      }
+    } else if (new_win) {
+      fconfig->split = p_sb ? kWinSplitBelow : kWinSplitAbove;
     }
   }
 
